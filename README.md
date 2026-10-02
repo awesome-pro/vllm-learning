@@ -1,4 +1,4 @@
-# vLLM Learning Project — Linux / GPU edition
+# vLLM Learning Project
 
 A hands-on, source-grounded path into **vLLM**: what it is, how the engine works, how to run and
 tune it, and how to change it. You run everything on a rented Linux GPU (RunPod), because that is
