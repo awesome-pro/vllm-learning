@@ -44,7 +44,7 @@ export PATH="$HOME/.local/bin:$PATH"
 
 # Export these so the child prefetch.sh (and the sanity check) inherit them.
 export WS VENV HF_HOME VLLM_SRC
-export HF_HUB_ENABLE_HF_TRANSFER=1     # requires hf_transfer, installed below
+export HF_XET_HIGH_PERFORMANCE=1       # fast downloads; supersedes HF_HUB_ENABLE_HF_TRANSFER
 export TOKENIZERS_PARALLELISM=false
 
 # Decide the CUDA stack unless the caller forced one.
@@ -184,8 +184,10 @@ else
       --torch-backend="$TORCH_BACKEND"
   fi
 fi
-# hf_transfer makes weight downloads several times faster.
-uv pip install --python "$VENV/bin/python" hf_transfer >/dev/null
+# Fast downloads need no extra package now: the hub's Xet backend (hf_xet) ships with
+# huggingface_hub and HF_XET_HIGH_PERFORMANCE is what turns it on. hf_transfer, which
+# this script used to install, is no longer used by the hub at all (hub 1.33 warns
+# about it), so installing it would only add a dependency that does nothing.
 
 # ---------------------------------------------------------------------------
 say "5/7  Cloning the vLLM source at v$VLLM_VERSION"
@@ -202,10 +204,18 @@ echo "read the source here: \$VLLM_SRC  ($VLLM_SRC)"
 # ---------------------------------------------------------------------------
 say "6/7  Persisting the environment in ~/.bashrc"
 MARK="# >>> vlearning >>>"
-if grep -qF "$MARK" "$HOME/.bashrc" 2>/dev/null; then
-  echo "already present in ~/.bashrc"
-else
-  cat >> "$HOME/.bashrc" <<EOF
+END="# <<< vlearning <<<"
+if grep -qF "$MARK" "$HOME/.bashrc" 2>/dev/null && grep -qF "$END" "$HOME/.bashrc" 2>/dev/null; then
+  # Rewrite rather than skip. The exports in this block are version-specific — for
+  # example HF_HUB_ENABLE_HF_TRANSFER was replaced by HF_XET_HIGH_PERFORMANCE — so a
+  # pod that bootstrapped with an older script would otherwise carry a stale
+  # environment for the rest of its life. Both markers must be present before we
+  # delete anything: a half-written block would otherwise take the rest of the file
+  # with it.
+  sed -i.bak "/^$MARK\$/,/^$END\$/d" "$HOME/.bashrc" 2>/dev/null || true
+  echo "refreshing the vlearning block (previous copy kept as ~/.bashrc.bak)"
+fi
+cat >> "$HOME/.bashrc" <<EOF
 
 $MARK
 export WS="$WS"
@@ -214,14 +224,13 @@ export HF_HOME="$HF_HOME"
 export VENV="$VENV"
 export UV_PYTHON_INSTALL_DIR="$UV_PYTHON_INSTALL_DIR"
 export UV_CACHE_DIR="$UV_CACHE_DIR"
-export HF_HUB_ENABLE_HF_TRANSFER=1
+export HF_XET_HIGH_PERFORMANCE=1
 export TOKENIZERS_PARALLELISM=false
 export PATH="\$HOME/.local/bin:\$PATH"
 [ -f "$VENV/bin/activate" ] && . "$VENV/bin/activate"
-# <<< vlearning <<<
+$END
 EOF
-  echo "appended to ~/.bashrc (re-login, or: source ~/.bashrc)"
-fi
+echo "wrote the environment block to ~/.bashrc (re-login, or: source ~/.bashrc)"
 
 # ---------------------------------------------------------------------------
 say "7/7  Sanity check"

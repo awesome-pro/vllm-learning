@@ -32,10 +32,11 @@ export UV_CACHE_DIR="${UV_CACHE_DIR:-$WS/uv-cache}"
 export PATH="$HOME/.local/bin:$PATH"          # uv installs itself here
 
 # --- Downloads ---------------------------------------------------------------
-# hf_transfer is installed by bootstrap.sh and makes weight downloads much faster.
-if python3 -c "import hf_transfer" 2>/dev/null || [ -d "$VENV/lib" ]; then
-  export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-1}"
-fi
+# HF_XET_HIGH_PERFORMANCE is the current switch for fast multi-connection downloads.
+# It supersedes HF_HUB_ENABLE_HF_TRANSFER, which huggingface_hub no longer uses and
+# now warns about ("hf_transfer is not used anymore" — seen on hub 1.33.0, the
+# version vLLM 0.30.0 resolves to). Set on a pod, so it is a no-op elsewhere.
+export HF_XET_HIGH_PERFORMANCE="${HF_XET_HIGH_PERFORMANCE:-1}"
 export TOKENIZERS_PARALLELISM=false
 
 # --- The model ladder --------------------------------------------------------

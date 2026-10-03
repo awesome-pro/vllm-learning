@@ -50,11 +50,19 @@ for m in "${MODELS[@]}"; do
   }
 done
 
+# Report the TOTAL cache size and the model *names*, never per-model sizes. Since
+# huggingface_hub 1.x the weights live in a shared content-addressed store at
+# $HF_HOME/hub/blobs/<xx>/<sha256>, and each models--* directory keeps only a few MB
+# of metadata plus symlinks into that store. So `du -sh models--*` reports about
+# 4 MB for an 8 GB model — measured on a pod: 4.4 MB per model directory against a
+# 9.0 GB cache. The names are the useful signal here; size only means anything as a
+# total.
 cat <<EOF
 
 ------------------------------------------------------------------
+ Total cache: $(du -sh "$HF_HOME" 2>/dev/null | cut -f1 || echo "?")
  Cached models:
-$(du -sh "$HF_HOME"/hub/models--* 2>/dev/null | sed 's/^/   /' || echo "   (none found)")
+$(ls -d "$HF_HOME"/hub/models--* 2>/dev/null | sed 's#.*/models--##; s/^/   /' || echo "   (none found)")
 
  Not prefetched on purpose:
    $MODEL_BIG  (15.3 GB) — bash scripts/prefetch.sh all
