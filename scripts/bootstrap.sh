@@ -75,6 +75,49 @@ if command -v nvidia-smi >/dev/null 2>&1; then
 else
   warn "nvidia-smi not found — this looks like a CPU-only machine. vLLM will not run."
 fi
+
+# --- GeForce + the CUDA forward-compatibility shim -------------------------
+# RunPod injects /etc/ld.so.conf.d/00-compat-<uuid>.conf, which puts the image's
+# bundled driver ahead of the host driver in the dynamic-loader cache:
+#
+#   libcuda.so.1 => /usr/local/cuda-13.0/compat/libcuda.so.580.178.04   <- wins
+#   libcuda.so.1 => /lib/x86_64-linux-gnu/libcuda.so.580.173.02         <- the host driver
+#
+# A user-space driver NEWER than the kernel driver means CUDA runs in *forward
+# compatibility* mode, which NVIDIA supports only on datacenter GPUs. On a GeForce
+# card every CUDA call then fails with:
+#
+#   Error 804: forward compatibility was attempted on non supported HW
+#
+# It looks exactly like a broken install — nvidia-smi still works, because it uses
+# NVML rather than libcuda — and reinstalling fixes nothing. Dropping that one conf
+# file lets the host driver win. Verified on a RunPod 4090: with the shim, torch
+# raises error 804; without it, torch.cuda.init() succeeds and reports 22.7 GiB free.
+#
+# Deliberately conditional on GeForce: on a datacenter card forward compatibility is
+# supported, and if the host driver is older than the toolkit the shim is genuinely
+# needed, so removing it there could break CUDA instead of fixing it.
+gpu_names="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || true)"
+if printf '%s' "$gpu_names" | grep -qi geforce; then
+  compat_confs="$(grep -l '/compat' /etc/ld.so.conf.d/*.conf 2>/dev/null || true)"
+  if [ -z "$compat_confs" ]; then
+    echo "cuda loader: no forward-compat shim in /etc/ld.so.conf.d (good)"
+  elif [ ! -w /etc/ld.so.conf.d ]; then
+    warn "a forward-compat shim is in the loader path but /etc/ld.so.conf.d is not writable."
+    warn "If CUDA fails with 'Error 804: forward compatibility', re-run this script as root."
+  else
+    mkdir -p /root/disabled-ld-so-conf
+    while IFS= read -r compat_conf; do
+      [ -n "$compat_conf" ] || continue
+      if mv "$compat_conf" /root/disabled-ld-so-conf/ 2>/dev/null; then
+        echo "cuda loader: disabled $compat_conf (forward compat is unsupported on GeForce)"
+      fi
+    done <<<"$compat_confs"
+    ldconfig 2>/dev/null || true
+    echo "cuda loader: libcuda.so.1 -> $(ldconfig -p 2>/dev/null | awk '/libcuda\.so\.1/ {print $NF; exit}')"
+  fi
+fi
+
 echo "workspace : $WS"
 echo "venv      : $VENV"
 echo "hf home   : $HF_HOME"

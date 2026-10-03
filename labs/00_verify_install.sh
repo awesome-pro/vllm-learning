@@ -148,6 +148,13 @@ PY
         "the install is fine: nvidia-smi and device_count() use NVML and still see the card, but CUDA cannot make a context. Work through docs/03-runpod-setup.md section 6"
       note "the device_count above comes from NVML, not from CUDA, so a non-zero"
       note "count does NOT mean CUDA works - every stage after this one needs it."
+      if grep -qi 'forward compat' <<<"$torch_out"; then
+        note "error 804 is specific and fixable: RunPod's forward-compat shim is being"
+        note "loaded ahead of the host driver, which GeForce cards cannot use. Repair:"
+        note "  mkdir -p /root/disabled-ld-so-conf"
+        note "  mv \"\$(grep -rl /compat /etc/ld.so.conf.d/)\" /root/disabled-ld-so-conf/ && ldconfig"
+        note "bootstrap.sh step 1 now does this automatically on a GeForce GPU."
+      fi
     else
       fail "torch.cuda.is_available() is False" \
         "CPU-only install - reinstall vLLM inside the venv with: uv pip install vllm --torch-backend=auto"

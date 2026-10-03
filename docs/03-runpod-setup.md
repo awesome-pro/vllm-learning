@@ -262,7 +262,7 @@ that it only guards the OpenAI-style routes — it is not a substitute for keepi
 | Startup hangs for minutes | `torch.compile` + CUDA graph capture at `-O2` | Expected on first run; for a fast loop use `-O0` or `--enforce-eager` while experimenting |
 | `nvcc: not found` during a JIT compile | The image lacks the CUDA toolkit for that kernel | Prefer a prebuilt backend: `VLLM_ATTENTION_BACKEND=FLASH_ATTN` |
 | `CUDA driver version is insufficient for CUDA runtime version`, or `libcudart.so.13: cannot open shared object file` | You paired a CUDA-13 vLLM with a CUDA-12 torch (or the image's CUDA does not match the wheel) | Re-run bootstrap (it detects and fixes this), or force it: `TORCH_BACKEND=cu129 bash scripts/bootstrap.sh`. See §3a. |
-| `nvidia-smi` works and the device count says `1`, but Python raises `CUDA unknown error` | NVML can see the card; the CUDA **runtime** cannot create a context on it | §6a. Do **not** reinstall anything — the install is not the problem. |
+| `nvidia-smi` works and the device count says `1`, but Python raises `CUDA unknown error` or `Error 804: forward compatibility was attempted on non supported HW` | NVML can see the card; the CUDA **runtime** cannot create a context on it — on a GeForce pod this is almost always RunPod's forward-compatibility shim | §6a. Do **not** reinstall anything — the install is not the problem. |
 | Disk full | Container disk filled with model weights | Set `HF_HOME=/workspace/hf` and re-pull; check `du -sh /workspace/*` |
 | Pod will not restart on Community | No 4090 capacity in that datacenter right now | Wait, or deploy a new pod and re-run bootstrap (Plan A's known weakness) |
 | Weights re-download every session | `HF_HOME` pointed at the container disk | It must be on `/workspace`; verify with `echo $HF_HOME` |
@@ -286,12 +286,18 @@ runtime : FAILED - RuntimeError: CUDA unknown error - this may be due to an
 Read it as **two separate facts from two separate libraries**, because that is what it is:
 
 - The device count is answered by **NVML**, the management library `nvidia-smi` also uses. It is working.
-- `torch.cuda.init()` failed because **`cudaGetDeviceCount()` returned `cudaErrorUnknown`** — raise site is
-  `case cudaErrorUnknown` in `device_count_impl`, PyTorch's `c10/cuda/CUDAFunctions.cpp`, which is where
-  that sentence comes from verbatim.
+- `torch.cuda.init()` failed because **`cudaGetDeviceCount()` returned an error code** — raise site is
+  `device_count_impl`, PyTorch's `c10/cuda/CUDAFunctions.cpp`, which is where the wording comes from.
 
-So the card is present and the runtime handshake is broken. What you did **not** get is just as
-informative:
+The error code varies with how the driver handshake breaks, and it is the most informative part of the whole
+message. Two turn up on RunPod pods:
+
+| Code | Text | What it means |
+| --- | --- | --- |
+| 999 | `CUDA unknown error - this may be due to an incorrectly set up environment …` | A generic driver-side failure; the usual causes are the forward-compat shim below, or a host whose GPU attach is broken |
+| **804** | `forward compatibility was attempted on non supported HW` | **Specific and good news**: the forward-compat shim is loaded and is the entire problem — fix it with fix 1 below and nothing else |
+
+What you did **not** get is just as informative:
 
 | Error you did not get | Cause it rules out |
 | --- | --- |
@@ -302,20 +308,45 @@ informative:
 
 Three fixes, cheapest first.
 
-**1. A stale forward-compat `libcuda` shadowing the real driver.** CUDA images ship `/usr/local/cuda/compat`
-so that a new toolkit can run on an older driver. A CUDA 13 runtime will refuse that shim on a 580 driver,
-while NVML — which comes from the host, not the image — keeps working. Find out which library is loaded,
-then drop the shim:
+**1. The RunPod forward-compatibility shim — by far the most likely cause on a GeForce pod.** This one is
+worth understanding properly, because the obvious diagnosis is wrong. RunPod injects
+`/etc/ld.so.conf.d/00-compat-<uuid>.conf`, which puts the image's bundled driver ahead of the host driver in
+the **dynamic-loader cache**:
 
-```bash
-LD_DEBUG=libs "$VENV/bin/python" -c "import torch" 2>&1 | grep -i libcuda | head -3
-unset CUDA_VISIBLE_DEVICES
-export LD_LIBRARY_PATH="$(printf '%s' "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -vE '/usr/local/cuda/(compat|lib64/stubs)' | paste -sd: -)"
-"$VENV/bin/python" -c "import torch; torch.cuda.init(); print(torch.cuda.get_device_name(0))"
+```
+libcuda.so.1 => /usr/local/cuda-13.0/compat/libcuda.so.580.178.04   <- wins
+libcuda.so.1 => /lib/x86_64-linux-gnu/libcuda.so.580.173.02         <- the host driver
 ```
 
-If the last line prints your card, make it permanent by adding the same `LD_LIBRARY_PATH` line to
-`scripts/env.sh`. (`$VENV` comes from `source scripts/env.sh`; substitute the path if you have not sourced it.)
+A user-space driver *newer* than the kernel driver puts CUDA into **forward compatibility** mode, which NVIDIA
+supports only on datacenter GPUs. On a GeForce card every CUDA call then fails with error **804**:
+
+```
+Error 804: forward compatibility was attempted on non supported HW
+```
+
+Two details make this trap nasty. `nvidia-smi` keeps working, because it uses **NVML**, not `libcuda` — so the
+card looks healthy. And `LD_LIBRARY_PATH` is usually **empty** on these pods, so nothing you unset there will
+help; the shim is in `ld.so.conf`. Confirm and fix it with:
+
+```bash
+ldconfig -p | grep 'libcuda\.so'        # compat listed first => this is your bug
+grep -rl /compat /etc/ld.so.conf.d/     # the conf file responsible
+
+mkdir -p /root/disabled-ld-so-conf
+mv "$(grep -rl /compat /etc/ld.so.conf.d/)" /root/disabled-ld-so-conf/
+ldconfig
+ldconfig -p | grep 'libcuda\.so'        # now only /lib/x86_64-linux-gnu, at the host's version
+```
+
+**`scripts/bootstrap.sh` does this for you** in step 1, automatically, whenever the GPU is a GeForce. It is
+conditional on purpose: on a datacenter card forward compatibility *is* supported, and when the host driver
+genuinely is older than the toolkit the shim is doing a necessary job, so removing it there could break CUDA
+rather than fix it.
+
+On the pod this was verified on, the numbers were: shim loaded (580.178.04) → `torch.cuda.init()` raised error
+804; shim removed → `torch.cuda.init()` succeeded and reported `22.7 GiB free / 23.5 GiB total`, capability
+`(8, 9)`. No env var, no reinstall, no redeploy.
 
 **2. A glitched GPU attach.** Stop the pod and start it again — restarting the container is not always
 enough, because the NVIDIA runtime hooks run at container start. Then re-run `bash scripts/bootstrap.sh`.
