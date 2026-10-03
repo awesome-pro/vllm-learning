@@ -207,27 +207,48 @@ The proxy does **not** support `scp`/`sftp`. It is still fine for VS Code Remote
 ssh root@<public-ip> -p <mapped-port>
 ```
 
-This also gives you `rsync`/`scp`, which is how you move this guide onto the pod (§7).
+This also gives you `rsync`/`scp`, which the proxy does not support. Both the IP and the port change on
+every redeploy, so re-read them from Connect → SSH each time rather than trusting notes.
 
 ### VS Code Remote-SSH
 
-1. Local: `ssh-keygen -t ed25519` if you have no key, then paste the **public** key into the pod's
-   `~/.ssh/authorized_keys` (RunPod also lets you register keys account-wide, which is easier).
-2. Local `~/.ssh/config`:
+1. **Key.** `ssh-keygen -t ed25519` if you have none, then register the **public** key in RunPod's
+   account settings *before* deploying — RunPod injects it into every pod, so you never edit
+   `authorized_keys`. Prove it from your laptop first; if this prints the pod's hostname, VS Code will
+   work too:
 
-```
-Host runpod-4090
-    HostName ssh.runpod.io
-    User <pod-id>-<hash>
-    IdentityFile ~/.ssh/id_ed25519
-    # If you enabled TCP 22, use the direct form instead:
-    # HostName <public-ip>
-    # Port <mapped-port>
-    # User root
-```
+   ```bash
+   ssh root@<public-ip> -p <mapped-port> -i ~/.ssh/id_ed25519 'hostname'
+   ```
 
-3. VS Code → Remote-SSH → **Connect to Host…** → `runpod-4090`.
-4. Install the Python extension **on the remote**, and point it at `/workspace/venv/bin/python`.
+2. **Local `~/.ssh/config`** — one block, and the Remote Explorer then lists it by name:
+
+   ```
+   Host runpod-4090
+       HostName <public-ip>
+       Port <mapped-port>
+       User root
+       IdentityFile ~/.ssh/id_ed25519
+       IdentitiesOnly yes
+       ServerAliveInterval 30
+       ServerAliveCountMax 6
+   ```
+
+   `ServerAliveInterval` earns its place on RunPod: without keepalives an idle connection gets dropped
+   and VS Code reconnects in the middle of your edit. (For the proxy form instead: `HostName
+   ssh.runpod.io`, `User <pod-id>-<hash>`, and no `Port`.)
+
+   **This block goes stale on every redeploy.** A new pod means a new IP and port; update those two
+   values or the alias simply refuses to connect.
+
+3. VS Code → Remote Explorer → SSH → `runpod-4090` → the **→ arrow** ("Connect in New Window"). If the
+   host is not listed yet, run `Cmd+Shift+P` → *Developer: Reload Window* so VS Code re-reads the config.
+
+4. **The first connect takes 1–2 minutes** while VS Code installs its server onto the pod — and on Plan C
+   that repeats **every session**, because the server lives on the container disk that a stop wipes.
+   It is not a hang. If it does wedge: *Remote-SSH: Kill VS Code Server on Host*, then reconnect.
+
+5. Install the Python extension **on the remote**, and point it at `/workspace/venv/bin/python`.
    Now `import vllm` resolves, and you can `Ctrl-click` from a lab straight into vLLM's source.
    That single navigation trick is most of what makes this project work.
 
