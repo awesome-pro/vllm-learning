@@ -267,7 +267,7 @@ decode latency for cache capacity. Lab 07 measures exactly this.
 
 | Symptom | Likely knob | What to try |
 | --- | --- | --- |
-| OOM at startup | `--max-model-len`, `--gpu-memory-utilization` | Lower `--max-model-len` first (or set it to `auto`), then drop util to 0.85. Read the OOM message: it prints the exact KV byte value that would fit. Beware — it spells the flag `--kv-cache-memory`, which does not exist (doc 02 §9) |
+| OOM at startup | `--max-model-len`, `--gpu-memory-utilization` | Lower `--max-model-len` first (or set it to `auto`), then drop util to 0.85. Read the OOM message: it prints the exact KV byte value that would fit. It spells the flag `--kv-cache-memory`, which argparse accepts as an unambiguous prefix of `--kv-cache-memory-bytes` (doc 02 §9) — write the full name in any script you keep |
 | OOM at startup, nothing changed | a co-tenant on the GPU | Util is a fraction of *total* memory but profiling measures *free* memory. Isolate the container, or lower util |
 | High TTFT | `--max-num-batched-tokens` (up), prefix caching, `--max-num-queued-tokens` | Bigger steps prefill more per step. Confirm prefix caching is on and being hit. Cap the queue so TTFT has a floor you control |
 | High inter-token latency | `--max-num-batched-tokens` (down), `--max-num-seqs` (down), `--performance-mode interactivity` | Smaller steps mean fewer prefill tokens competing with your decodes. Prefer this over disabling chunked prefill |

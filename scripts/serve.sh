@@ -22,11 +22,18 @@
 #
 # Watch the startup log for the one line that tells you your real capacity:
 #
-#   GPU KV cache size: 34,912 tokens, Maximum concurrency for 8,192 tokens
-#   per request: 4.26x
+#   GPU KV cache size: 176,192 tokens, Maximum concurrency for 8,192 tokens
+#   per request: 21.51x
 #
 # That is the number of tokens you can cache, and the concurrency it buys at
 # the context length you asked for. It is printed before any traffic arrives.
+#
+# Those figures are MEASURED, not predicted: a RunPod RTX 4090 (23.5 GiB) running this
+# script with its own defaults -- Qwen3-0.6B, UTIL=0.90, max-model-len 8192 -- where it
+# also printed "Available KV cache memory: 18.82 GiB". Check the arithmetic yourself:
+# 18.82 GiB / 176,192 tokens = 112.0 KiB per token, the 0.6B figure in README.md's
+# ladder. Change the model or the context length and both numbers move; that is the
+# labs' job, and this line is the one to predict before you run them.
 # ---------------------------------------------------------------------------
 
 set -euo pipefail

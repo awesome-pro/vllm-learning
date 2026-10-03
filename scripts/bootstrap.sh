@@ -99,6 +99,17 @@ fi
 # needed, so removing it there could break CUDA instead of fixing it.
 gpu_names="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || true)"
 if printf '%s' "$gpu_names" | grep -qi geforce; then
+  # The shim can arrive two ways: /etc/ld.so.conf.d (what we saw on RunPod) or
+  # LD_LIBRARY_PATH (which takes precedence over the loader cache and cannot be fixed
+  # by editing conf files). Check both, or a "fixed" pod still fails.
+  case "${LD_LIBRARY_PATH:-}" in
+    *compat*)
+      warn "LD_LIBRARY_PATH contains a compat path: $LD_LIBRARY_PATH"
+      warn "That beats the loader cache, so editing ld.so.conf.d cannot help. Strip the"
+      warn "/compat entry from LD_LIBRARY_PATH before running CUDA."
+      ;;
+  esac
+
   compat_confs="$(grep -l '/compat' /etc/ld.so.conf.d/*.conf 2>/dev/null || true)"
   if [ -z "$compat_confs" ]; then
     echo "cuda loader: no forward-compat shim in /etc/ld.so.conf.d (good)"
@@ -114,7 +125,16 @@ if printf '%s' "$gpu_names" | grep -qi geforce; then
       fi
     done <<<"$compat_confs"
     ldconfig 2>/dev/null || true
-    echo "cuda loader: libcuda.so.1 -> $(ldconfig -p 2>/dev/null | awk '/libcuda\.so\.1/ {print $NF; exit}')"
+    # Verify rather than assume: report which driver won, and complain if it is still
+    # the shim. Getting this wrong is exactly what cost hours the first time.
+    loader_now="$(ldconfig -p 2>/dev/null | awk '/libcuda\.so\.1/ {print $NF; exit}')"
+    case "$loader_now" in
+      *compat*)
+        warn "libcuda.so.1 STILL resolves to the shim: $loader_now"
+        warn "CUDA will keep failing with error 804. See docs/03-runpod-setup.md section 6a."
+        ;;
+      *) echo "cuda loader: libcuda.so.1 -> $loader_now" ;;
+    esac
   fi
 fi
 

@@ -96,8 +96,11 @@
 #     and `vllm/v1/worker/gpu_worker.py:615-700`. The number you actually care about is
 #     the one vLLM prints: "Available KV cache memory".
 #   * Careful: `$VLLM_SRC/docs/configuration/optimization.md` calls the memory knob
-#     `--kv-cache-memory`. The real flag is `--kv-cache-memory-bytes`
-#     (`vllm/engine/arg_utils.py:1335`). Docs lag the code; the code wins.
+#     `--kv-cache-memory`. The registered flag is `--kv-cache-memory-bytes`
+#     (`vllm/engine/arg_utils.py`, the "--kv-cache-memory-bytes" action). The short
+#     spelling works only because argparse matches unambiguous prefixes -- luck, not
+#     interface, and it breaks the day another `--kv-cache-memory*` flag appears.
+#     Write the full name.
 # ---------------------------------------------------------------------------
 
 set -euo pipefail

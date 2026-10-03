@@ -90,9 +90,10 @@
 #       "No available memory for the cache blocks."  -> vllm/v1/core/kv_cache_utils.py:922-928
 #       a "Free memory on device (X/Y GiB) on startup. Desired GPU memory utilization is ..."
 #       INFO line -> vllm/v1/worker/gpu_worker.py:967-990, which helpfully suggests
-#       `--kv-cache-memory=<N>`. THAT FLAG DOES NOT EXIST: the real one is
-#       `--kv-cache-memory-bytes` (`vllm/engine/arg_utils.py:1335`). Even vLLM's own
-#       log lines can name a knob that is not real; check the source.
+#       `--kv-cache-memory=<N>`. The registered flag is `--kv-cache-memory-bytes`
+#       (`vllm/engine/arg_utils.py`); the suggested spelling is accepted only because
+#       argparse matches unambiguous prefixes. Even vLLM's own log lines name a knob
+#       that is not the flag's real name -- write the full one.
 #   * Qwen3-8B bf16 is ~15.3 GB of weights and 144 KiB/token of KV; Qwen3-30B-A3B is
 #     ~61.1 GB bf16 / ~30.6 GB at fp8 and 96 KiB/token of KV (bf16) / 48 KiB (fp8).
 #     Both repos are non-gated apache-2.0 (checked against the HuggingFace API).
@@ -101,7 +102,9 @@
 # PREDICTED (arithmetic, not measurement — 2 x 24 GB, UTIL=0.90 -> 21.6 GB budget/rank):
 #   tp1, Qwen3-8B :  weights 15.3 GB, activations ~1.5 GB -> ~4.8 GB KV
 #                    -> 4.8 GiB / 144 KiB ~= 34,900 tokens
-#                    (scripts/serve.sh quotes 34,912 tokens / 4.26x as its example line)
+#                    (this lab is where you check it -- do not compare against
+#                     serve.sh's example line, which describes the 0.6B model it
+#                     serves by default, not the 8B you are predicting here)
 #   tp2, Qwen3-8B :  weights ~7.65 GB/rank, activations ~1.5 GB/rank -> ~12.4 GB KV/rank
 #                    AND the bytes/token per rank halve to 72 KiB (4 of 8 KV heads)
 #                    -> 12.4 GiB / 72 KiB ~= 181,000 tokens
@@ -588,8 +591,9 @@ do_moe_tp1_fail() {
   if grep -q 'Free memory on device' "$log"; then
     printf '  FOUND: the "Free memory on device ..." INFO line:\n'
     grep -m1 -A2 'Free memory on device' "$log" | sed 's/^/    /'
-    printf '  That line suggests a `--kv-cache-memory=<N>` value. THERE IS NO SUCH FLAG:\n'
-    printf '  the real one is `--kv-cache-memory-bytes` (vllm/engine/arg_utils.py:1335).\n'
+    printf '  That line suggests a `--kv-cache-memory=<N>` value. The registered flag is the\n'
+    printf '  longer `--kv-cache-memory-bytes` (vllm/engine/arg_utils.py); the short spelling is\n'
+    printf '  accepted only because argparse matches unambiguous prefixes, so do not rely on it.\n'
     printf '  The suggestion is also useless here — the problem is the weights, not the KV.\n'
     saw=1
   fi

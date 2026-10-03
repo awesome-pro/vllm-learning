@@ -11,7 +11,7 @@ shown beside it.
 > **Two doc warnings.** `$VLLM_SRC/docs/design/paged_attention.md` is still marked *"historical document
 > based on the original paper… It no longer describes the code used in vLLM today."* Read it for the
 > kernel's memory layout only. And the official optimization page calls the KV-memory knob
-> `--kv-cache-memory`; no such flag exists. The real one is `--kv-cache-memory-bytes` (§9).
+> `--kv-cache-memory`, which is not the flag's name — it only *appears* to work, and §9 explains why.
 
 ---
 
@@ -336,11 +336,24 @@ memory-profiling pass, which shortens startup; the trade-off, from
 optimistic one fails at allocation time. The value is only valid on the same GPU with the same free
 memory.
 
-> **Doc-versus-source flag.** The official optimization page and the in-tree
-> `$VLLM_SRC/docs/configuration/optimization.md` both call this knob **`--kv-cache-memory`**, which is
-> not a flag; `vllm/engine/arg_utils.py` registers `--kv-cache-memory-bytes`. Worse, vLLM's own
-> out-of-memory advice text suggests `--kv-cache-memory=<bytes>` twice (`vllm/v1/worker/gpu_worker.py`)
-> — copy-pasting it fails.
+> **Doc-versus-source flag, and a trap worth understanding.** The official optimization page, the in-tree
+> `$VLLM_SRC/docs/configuration/optimization.md`, and vLLM's own out-of-memory advice text
+> (`vllm/v1/worker/gpu_worker.py`) all spell this knob **`--kv-cache-memory`**. The flag vLLM actually
+> registers is `--kv-cache-memory-bytes` (`vllm/engine/arg_utils.py`), so you would expect the short
+> spelling to fail.
+>
+> It does not fail. **It works** — and the reason is worth internalising. argparse matches unambiguous
+> prefixes of long options by default (`allow_abbrev=True`, which vLLM never overrides), so
+> `--kv-cache-memory`, `--kv-cache-mem`, and even `--kv-cache-memo` all bind to
+> `--kv-cache-memory-bytes`. Verified on vLLM 0.30.0: `--kv-cache-mem=abc` fails with *"argument
+> --kv-cache-memory-bytes: Value abc cannot be converted to…"*, naming the flag it really bound to, and a
+> `--kv-cache-memory=1000000` run reports `'kv_cache_memory_bytes': 1000000` in its startup banner.
+>
+> Treat prefix matching as a party trick, not an interface: it holds only while the prefix stays
+> unambiguous, and vLLM already has five `--kv-cache-*` flags. `--kv-cache=1` fails with *"ambiguous
+> option: --kv-cache=1 could match --kv-cache-memory-bytes, --kv-cache-dtype,
+> --kv-cache-dtype-skip-layers, --kv-cache-metrics, --kv-cache-metrics-sample"*. Write the full
+> `--kv-cache-memory-bytes` in anything you intend to keep.
 
 ---
 
