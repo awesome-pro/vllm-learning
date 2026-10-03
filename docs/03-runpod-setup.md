@@ -77,6 +77,26 @@ Console → **Pods** → **Deploy**.
 Use the **RunPod PyTorch** template as the starting point and override its image tag with the value
 above. The image string is the part that matters.
 
+> **Your tag may be newer than the table's, and that is fine.** The template currently offers
+> `runpod/pytorch:1.4.0-rc.164-cu1300-torch2130-ubuntu2404` (template `runpod-torch-v280`) — an `rc`
+> build carrying torch 2.13.0 rather than 2.9.1. It works, because what has to match is the **CUDA major
+> version (13.0)** and your driver: `bootstrap.sh` builds its own venv and installs its own torch, so the
+> image's preinstalled torch is never imported by anything you run. An `rc` tag is just one more variable
+> to eliminate if CUDA misbehaves (§6a), which is the only reason the pinned tag is preferred.
+
+**Then verify you actually got the volume disk.** This takes ten seconds and is easy to miss, because
+*Pod details* lists **Volume disk** on its own line, separately from *Container disk* — and `/workspace`
+exists either way. From inside the pod:
+
+```bash
+df -Pk /workspace / | awk '{print $1, $6}'   # same device as / => no volume disk attached
+```
+
+If both lines name the same filesystem, `/workspace` is on the container disk and everything this guide
+puts there is temporary. `scripts/bootstrap.sh` runs this same check in step 1 and warns you. **A volume
+disk cannot be attached to a running pod**, so if you meant Plan A and skipped it, redeploy now — before
+you download 9 GB of weights.
+
 > **Why not the official `vllm/vllm-openai:v0.30.0` image?** It is excellent and it is what you would
 > deploy in production, but its entrypoint *is* the API server: you get a working OpenAI endpoint
 > and no comfortable way to edit source, run `pytest`, or use VS Code. This guide is about

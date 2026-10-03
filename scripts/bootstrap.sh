@@ -80,6 +80,26 @@ echo "venv      : $VENV"
 echo "hf home   : $HF_HOME"
 echo "vllm src  : $VLLM_SRC"
 
+# A volume disk and a container disk look identical from inside the pod: /workspace
+# is /workspace either way. But RunPod clears the container disk when the pod stops,
+# so this one check decides whether the venv, the model cache and the source clone
+# survive the night. If /workspace sits on the same filesystem as /, there is no
+# volume disk attached and everything below is temporary.
+ws_dev="$(df -Pk "$WS" 2>/dev/null | awk 'NR==2 {print $1}' || true)"
+root_dev="$(df -Pk / 2>/dev/null | awk 'NR==2 {print $1}' || true)"
+if [ -z "$ws_dev" ]; then
+  warn "could not determine the filesystem for $WS - skipping the persistence check"
+elif [ "$ws_dev" = "$root_dev" ]; then
+  warn "$WS is on the CONTAINER disk (same filesystem as /: $ws_dev)."
+  warn "RunPod clears that when the pod stops, so the venv, the model cache and the"
+  warn "source clone will not be there next session. That is fine if you picked Plan C"
+  warn "deliberately - just re-run this script each session. If you meant Plan A,"
+  warn "redeploy with a volume disk before downloading models:"
+  warn "docs/03-runpod-setup.md section 1."
+else
+  echo "storage   : $WS is a separate mount ($ws_dev) - survives a stop"
+fi
+
 # ---------------------------------------------------------------------------
 say "2/7  Installing uv"
 if command -v uv >/dev/null 2>&1; then
