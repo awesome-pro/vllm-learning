@@ -17,25 +17,33 @@ the **v0.30.0 source tree** and the current official docs on 2026-10-02. The lab
 ## The 20-minute version
 
 ```bash
-# 1. Rent the pod. The exact console recipe (image, disks, ports) is in docs/03-runpod-setup.md.
+# 1. Rent the pod. The exact console recipe (image, disks, ports) is docs/03-runpod-setup.md §2,
+#    and §2 also shows the 10-second check that you got the storage you meant.
 
-# 2. Put this guide on it — rsync over direct SSH, or git clone your own copy:
-rsync -avz -e "ssh -p <mapped-port>" ~/Desktop/vlearning/ root@<public-ip>:/workspace/vlearning/
+# 2. Put this guide on it. It is a PUBLIC repo, so cloning needs no credentials -- use HTTPS:
+cd /workspace
+git clone https://github.com/awesome-pro/vllm-learning.git vlearning
 
-# 3. On the pod. One command: uv + venv + vLLM + the vLLM v0.30.0 source + model prefetch
-#    + a GPU sanity check. It also puts the venv, the interpreter and the model cache on
-#    /workspace, because RunPod clears the container disk every time a pod stops.
-bash /workspace/vlearning/scripts/bootstrap.sh
+# 3. One command: uv + venv + vLLM 0.30.0 + the matching source checkout + the model ladder
+#    + a GPU sanity check. Idempotent, so re-run it after any restart. It also disables the
+#    RunPod forward-compatibility shim that breaks CUDA on GeForce cards (docs §6a).
+bash vlearning/scripts/bootstrap.sh
 
-# 4. Start the server (leave it running)...
-bash /workspace/vlearning/scripts/serve.sh
+# 4. Prove the machine BEFORE reading anything. Offline, no server needed, ~40 s:
+cd vlearning && source scripts/env.sh
+bash labs/00_verify_install.sh
 
-# 5. ...and in a second terminal, prove the whole stack works:
-bash /workspace/vlearning/labs/00_verify_install.sh
+# 5. Only now start the server, for Stage 1 onward (leave it running in its own terminal):
+bash scripts/serve.sh
 ```
 
-Then work through `CURRICULUM.md` stage by stage. Stage 0 is "get a token out of a GPU". It gets
-harder from there, deliberately.
+Then work through `CURRICULUM.md` stage by stage, starting at Stage 0, "get a token out of a GPU".
+Watch the numbering: **stages and labs are off by one** — Stage 0 is labs `00` and `01`, Stage 1 is
+`serve.sh` plus lab `02`, and so on.
+
+> **On Plan C (no volume disk) nothing on the pod survives a stop**, `/workspace` included. That is a
+> legitimate and cheapest choice — §8 has the four-command ritual that rebuilds everything in about ten
+> minutes, and it is the reason this guide is a git repo rather than a folder you copy once.
 
 ---
 
@@ -55,7 +63,7 @@ Start at [`CURRICULUM.md`](CURRICULUM.md).
 
 ---
 
-## Verified facts (checked 2026-10-02, vLLM v0.30.0)
+## Verified facts (checked 2026-10-02, re-verified on a real RunPod 4090 2026-10-03, vLLM v0.30.0)
 
 | Question | Answer |
 | --- | --- |
@@ -73,6 +81,9 @@ Start at [`CURRICULUM.md`](CURRICULUM.md).
 | Default `--max-num-seqs`? | **256** below 70 GB (and on A100); **1024** at ≥ 70 GB. `--performance-mode throughput` doubles **both** batch budgets — each only if you left it at the default — and then clamps `max_num_seqs` to `max_num_batched_tokens` (`vllm/engine/arg_utils.py`). |
 | What does the KV-cache startup line look like? | **One merged line** now: `GPU KV cache size: 1,234,567 tokens, Maximum concurrency for 8,192 tokens per request: 150.70x` (`vllm/v1/core/kv_cache_utils.py`). Older guides quote two separate lines. |
 | Which models should I use? | The non-gated **Qwen3** family: `Qwen3-0.6B` (fast loop), `Qwen3-4B` (comfortable), `Qwen3-8B` (realistic for 24 GB), `Qwen3-30B-A3B` (30B MoE — needs 48 GB+). `meta-llama/Llama-3.1-8B-Instruct` is **gated** (license + token), so it is not the teaching default. |
+| Why does CUDA die with `Error 804: forward compatibility was attempted on non supported HW`? | RunPod puts a **forward-compatibility driver shim** ahead of the real driver in the loader cache (`/etc/ld.so.conf.d/00-compat-*.conf` → `/usr/local/cuda-13.0/compat/libcuda.so.580.178.04`, beating the host's 580.173.02). A user-space driver newer than the kernel driver means forward-compatibility mode, which NVIDIA supports on datacenter GPUs only. `bootstrap.sh` disables the shim on GeForce; the manual recipe is §6a. Note `nvidia-smi` keeps working throughout, because it uses NVML rather than `libcuda` — that is exactly what makes this look like a broken install. |
+| Where do downloaded weights actually live? | Not in the per-model directory. huggingface_hub 1.x keeps blobs in a **shared content-addressed store** at `$HF_HOME/hub/blobs/<xx>/<sha256>`, and each `models--*` directory holds only metadata plus symlinks into it — so `du -sh models--*` reports ≈4 MB for an 8 GB model. Measure the cache with `du -sh $HF_HOME`. |
+| Does `--kv-cache-memory` work, given vLLM only registers `--kv-cache-memory-bytes`? | **Yes, it works** — argparse matches unambiguous prefixes of long options by default and vLLM never overrides `allow_abbrev`. So vLLM's own OOM advice is copy-pasteable, but the abbreviation breaks as soon as a prefix becomes ambiguous (`--kv-cache=1` already fails). Write the full `--kv-cache-memory-bytes`. Verified on v0.30.0; see doc 02 §9. |
 
 ### The machine you are renting
 
@@ -80,7 +91,8 @@ Start at [`CURRICULUM.md`](CURRICULUM.md).
 GPU            1× RTX 4090, 24 GB GDDR6X           — Ada (SM 8.9), so FP8 W8A8 works
 Precision      bf16 / fp16, fp8 weights, fp8 KV cache
 Interconnect   PCIe only (no NVLink) — matters for the multi-GPU stage
-Storage        /workspace volume (persists) + container disk (wiped when stopped)
+Storage        depends on the plan you chose: a volume disk at /workspace (persists) or
+               container-only (wiped at every stop). §1 decides it, §2 verifies it
 Cost           ~$0.34/hr Community · ~$0.74/hr Secure, plus storage — see the setup doc
 ```
 
@@ -106,6 +118,12 @@ from the VRAM figure**, and remember the engine's own startup line is the final 
 the 0.6B. The whole ladder is 24.2 GB on disk. Note the ratio: 8 KV heads for 32 query heads is
 **GQA**, which is why the cache is 4× smaller than a non-grouped model would need — this is the
 single biggest reason modern models are servable at all.)
+
+**Confirmed on hardware.** A 4090 running the 0.6B through `serve.sh`'s defaults printed
+`Available KV cache memory: 18.82 GiB` and `GPU KV cache size: 176,192 tokens`. Divide them:
+18.82 GiB ÷ 176,192 = **112.0 KiB per token**, exactly the 0.6B row above, and
+`176,192 ÷ 8,192 = 21.51` is the concurrency it reported. The formula in this section is not
+approximate — it predicted the number the engine printed.
 
 Do not take the table's word for it — Lab 04 makes you derive the real numbers from the startup
 log of the card you actually rented.
