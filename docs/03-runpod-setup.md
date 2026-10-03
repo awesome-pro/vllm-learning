@@ -242,6 +242,7 @@ that it only guards the OpenAI-style routes — it is not a substitute for keepi
 | Startup hangs for minutes | `torch.compile` + CUDA graph capture at `-O2` | Expected on first run; for a fast loop use `-O0` or `--enforce-eager` while experimenting |
 | `nvcc: not found` during a JIT compile | The image lacks the CUDA toolkit for that kernel | Prefer a prebuilt backend: `VLLM_ATTENTION_BACKEND=FLASH_ATTN` |
 | `CUDA driver version is insufficient for CUDA runtime version`, or `libcudart.so.13: cannot open shared object file` | You paired a CUDA-13 vLLM with a CUDA-12 torch (or the image's CUDA does not match the wheel) | Re-run bootstrap (it detects and fixes this), or force it: `TORCH_BACKEND=cu129 bash scripts/bootstrap.sh`. See §3a. |
+| `nvidia-smi` works and the device count says `1`, but Python raises `CUDA unknown error` | NVML can see the card; the CUDA **runtime** cannot create a context on it | §6a. Do **not** reinstall anything — the install is not the problem. |
 | Disk full | Container disk filled with model weights | Set `HF_HOME=/workspace/hf` and re-pull; check `du -sh /workspace/*` |
 | Pod will not restart on Community | No 4090 capacity in that datacenter right now | Wait, or deploy a new pod and re-run bootstrap (Plan A's known weakness) |
 | Weights re-download every session | `HF_HOME` pointed at the container disk | It must be on `/workspace`; verify with `echo $HF_HOME` |
@@ -250,31 +251,114 @@ that it only guards the OpenAI-style routes — it is not a substitute for keepi
 | My notes/edits are gone but the models are still there | You edited files outside `/workspace` | Only `/workspace` persists. Keep the guide and your `notes/` in `/workspace/vlearning` and push to git |
 | Everything is slow and `nvidia-smi` shows no processes | You are on the *pod's* CPU, not the GPU — e.g. a CPU-only pip install | Re-run `labs/00_verify_install.sh`; confirm vLLM reports `device_type='cuda'` |
 
+### 6a. `nvidia-smi` works but CUDA does not
+
+This is the failure that looks most alarming and is least serious. From `scripts/bootstrap.sh` step 7:
+
+```
+nvml    : 1 device(s) visible to nvidia-smi/NVML
+runtime : FAILED - RuntimeError: CUDA unknown error - this may be due to an
+          incorrectly set up environment, e.g. changing env variable
+          CUDA_VISIBLE_DEVICES after program start. Setting the available
+          devices to be zero.
+```
+
+Read it as **two separate facts from two separate libraries**, because that is what it is:
+
+- The device count is answered by **NVML**, the management library `nvidia-smi` also uses. It is working.
+- `torch.cuda.init()` failed because **`cudaGetDeviceCount()` returned `cudaErrorUnknown`** — raise site is
+  `case cudaErrorUnknown` in `device_count_impl`, PyTorch's `c10/cuda/CUDAFunctions.cpp`, which is where
+  that sentence comes from verbatim.
+
+So the card is present and the runtime handshake is broken. What you did **not** get is just as
+informative:
+
+| Error you did not get | Cause it rules out |
+| --- | --- |
+| `The NVIDIA driver on your system is too old (found version …)` | a driver too old for CUDA 13 — yours is 580 and advertises CUDA 13.0 |
+| `Found no NVIDIA driver on your system` | a missing driver library in the container |
+| `No CUDA GPUs are available` / `device_count 0` | no GPU attached to the pod |
+| `ImportError` on `import torch` | a broken install — **reinstalling will not help** |
+
+Three fixes, cheapest first.
+
+**1. A stale forward-compat `libcuda` shadowing the real driver.** CUDA images ship `/usr/local/cuda/compat`
+so that a new toolkit can run on an older driver. A CUDA 13 runtime will refuse that shim on a 580 driver,
+while NVML — which comes from the host, not the image — keeps working. Find out which library is loaded,
+then drop the shim:
+
+```bash
+LD_DEBUG=libs "$VENV/bin/python" -c "import torch" 2>&1 | grep -i libcuda | head -3
+unset CUDA_VISIBLE_DEVICES
+export LD_LIBRARY_PATH="$(printf '%s' "$LD_LIBRARY_PATH" | tr ':' '\n' | grep -vE '/usr/local/cuda/(compat|lib64/stubs)' | paste -sd: -)"
+"$VENV/bin/python" -c "import torch; torch.cuda.init(); print(torch.cuda.get_device_name(0))"
+```
+
+If the last line prints your card, make it permanent by adding the same `LD_LIBRARY_PATH` line to
+`scripts/env.sh`. (`$VENV` comes from `source scripts/env.sh`; substitute the path if you have not sourced it.)
+
+**2. A glitched GPU attach.** Stop the pod and start it again — restarting the container is not always
+enough, because the NVIDIA runtime hooks run at container start. Then re-run `bash scripts/bootstrap.sh`.
+If it fails on a second host as well, the problem is not your pod.
+
+**3. Do not fight CUDA 13 — skip it:**
+
+```bash
+TORCH_BACKEND=cu129 bash scripts/bootstrap.sh
+```
+
+That installs the published CUDA 12.9 wheel paired with a CUDA 12 torch, which runs on the same 580
+driver. You lose nothing for this guide: CUDA 13 versus 12.9 changes no vLLM concept, no lab, and no
+number you record. It is the same fallback §3a uses for drivers older than 580.
+
 ---
 
 ## 7. Getting this guide onto the pod (and your notes back)
 
-Three options, best first:
+This project is a **public** git repo: `awesome-pro/vllm-learning`. Public means the pod can clone it
+with **no credentials at all**, as long as you use the **HTTPS** URL:
 
-1. **Git (recommended).** This project is not a git repo yet. Make it one so that notes recorded on
-   the pod can come home:
+```bash
+cd /workspace
+git clone https://github.com/awesome-pro/vllm-learning.git vlearning
+```
 
-   ```bash
-   # locally
-   cd ~/Desktop/vlearning && git init && git add -A && git commit -m "vLLM learning, GPU edition"
-   gh repo create vlearning --private --source=. --push   # or push to any remote
-   # on the pod
-   git clone <your-remote> /workspace/vlearning
-   ```
+Name the directory `vlearning` — every command in this guide assumes `/workspace/vlearning`.
 
-2. **rsync over direct SSH** (needs TCP 22 + public IP):
+> **Do not use the `git@github.com:` (SSH) URL on a fresh pod.** SSH asks GitHub to authenticate *you*,
+> and a new pod has no key registered, so it fails with `git@github.com: Permission denied (publickey)`
+> before GitHub ever looks at the repository. That error says nothing about whether the repo exists.
+
+**Pushing your notes back.** Reading needs no credentials; pushing needs write access — and there is a
+trap. `~/.ssh` lives on the **container disk**, which RunPod clears on every stop, so a key you generate
+there disappears. Keep it on the volume and tell git where to find it:
+
+```bash
+ssh-keygen -t ed25519 -f /workspace/.ssh/id_ed25519 -N "" -C "runpod"
+cat /workspace/.ssh/id_ed25519.pub     # GitHub -> Settings -> SSH and GPG keys -> New SSH key
+cd /workspace/vlearning
+git remote set-url origin git@github.com:awesome-pro/vllm-learning.git
+git config core.sshCommand "ssh -i /workspace/.ssh/id_ed25519 -o IdentitiesOnly=yes"
+```
+
+`core.sshCommand` is stored in `.git/config`, which is on `/workspace`, so it outlives the container disk
+even though the key's usual home does not.
+
+> **The repo is public, so your notes publish with it.** Never commit a RunPod API key, a HuggingFace
+> token, or `VLLM_API_KEY`. If you would rather it were private, weigh the trade first: a private repo
+> makes the pod's HTTPS clone demand a token, so you would need one of the credential setups above just
+> to *read* the guide.
+
+Two alternatives if you would rather not use git at all:
+
+1. **rsync over direct SSH** (needs TCP 22 + public IP):
 
    ```bash
    rsync -avz --exclude '.git' -e "ssh -p <port>" \
      ~/Desktop/vlearning/ root@<public-ip>:/workspace/vlearning/
    ```
 
-3. **`runpodctl send`** from a pod-side terminal, which prints a one-line receive command. Works over
+2. **`runpodctl send`** from a pod-side terminal, which prints a one-line receive command. Works over
    the web terminal when you have no direct SSH.
 
 ---

@@ -168,25 +168,54 @@ if ! "$VENV/bin/python" -c 'import sys' 2>/dev/null; then
   warn "the venv's interpreter is missing — it was on the container disk, which RunPod clears on stop."
   warn "re-run this script to rebuild it on the volume."
 fi
-"$VENV/bin/python" - <<'PY'
+
+# These are two different questions, and asking only the first is how a broken
+# pod looks healthy right up to the first model load:
+#   torch.cuda.device_count() -> "can NVML see a card?"  Same library nvidia-smi
+#       uses. It happily answers "1" on a pod where CUDA is completely unusable.
+#   torch.cuda.init()         -> "can the CUDA runtime create a context?"  This
+#       is the question every vLLM stage actually depends on.
+GPU_OK=1
+if ! "$VENV/bin/python" - <<'PY'
 import torch, vllm
-print(f"vllm   : {vllm.__version__}")
-print(f"torch  : {torch.__version__}")
-print(f"cuda   : {torch.version.cuda}")
-print(f"gpus   : {torch.cuda.device_count()}")
+print(f"vllm    : {vllm.__version__}")
+print(f"torch   : {torch.__version__}")
+print(f"cuda    : {torch.version.cuda}")
+print(f"nvml    : {torch.cuda.device_count()} device(s) visible to nvidia-smi/NVML")
+try:
+    torch.cuda.init()
+except Exception as exc:
+    print(f"runtime : FAILED - {type(exc).__name__}: {exc}")
+    raise SystemExit(1)
+print("runtime : ok - CUDA context created")
 for i in range(torch.cuda.device_count()):
     free, total = torch.cuda.mem_get_info(i)
     print(f"  [{i}] {torch.cuda.get_device_name(i)}  {total/2**30:.1f} GiB total, {free/2**30:.1f} GiB free")
 PY
+then
+  GPU_OK=0
+fi
 
+# Weights live on /workspace and survive a stop, so download them even when the
+# GPU is unusable: fixing the GPU later should not cost another 9 GB.
 if [ "${SKIP_PREFETCH:-0}" != "1" ]; then
+  if [ "$GPU_OK" = "0" ]; then
+    warn "downloading the model ladder anyway — the weights are on /workspace and persist,"
+    warn "so fixing the GPU later will not mean re-downloading them."
+  fi
   bash "$VL_ROOT/scripts/prefetch.sh" "$LADDER"
+fi
+
+if [ "$GPU_OK" = "1" ]; then
+  STATUS="Bootstrap complete."
+else
+  STATUS="Bootstrap finished, but the GPU check FAILED — read below."
 fi
 
 cat <<EOF
 
 ------------------------------------------------------------------
- Bootstrap complete.
+ $STATUS
 
    source ~/.bashrc            # or log out and back in
    cd $VL_ROOT
@@ -198,3 +227,43 @@ cat <<EOF
        release before a long session:  docs/03-runpod-setup.md §9
 ------------------------------------------------------------------
 EOF
+
+if [ "$GPU_OK" = "0" ]; then
+  cat <<EOF
+
+------------------------------------------------------------------
+ The INSTALL is fine. The CUDA RUNTIME is not.
+
+  nvidia-smi works because it uses NVML. CUDA needs a *context* on the
+  device, and creating that is what just failed — so the install above is
+  untouched and you do not need to reinstall anything. On RunPod this is
+  one of three things, cheapest to check first:
+
+  1. A stale forward-compat libcuda is shadowing the real driver. That is
+     what the image's /usr/local/cuda/compat directory is for, and a CUDA 13
+     runtime will refuse it on a 580 driver.
+
+       LD_DEBUG=libs "$VENV/bin/python" -c "import torch" 2>&1 | grep -i libcuda | head -3
+       unset CUDA_VISIBLE_DEVICES
+       export LD_LIBRARY_PATH="\$(printf '%s' "\$LD_LIBRARY_PATH" | tr ':' '\n' | grep -vE '/usr/local/cuda/(compat|lib64/stubs)' | paste -sd: -)"
+       "$VENV/bin/python" -c "import torch; torch.cuda.init(); print(torch.cuda.get_device_name(0))"
+
+     If the last line prints the card, make the change permanent by adding
+     the same LD_LIBRARY_PATH line to scripts/env.sh.
+
+  2. A glitched GPU attach. Stop the pod and start it again — restarting
+     the container is not always enough — then re-run this script.
+
+  3. Still broken after a restart? Do not fight CUDA 13, skip it:
+
+       TORCH_BACKEND=cu129 bash "$VL_ROOT/scripts/bootstrap.sh"
+
+     That installs the published CUDA 12.9 wheel, which pairs with a CUDA 12
+     torch and runs happily on the same 580 driver. Every vLLM concept in
+     this guide is identical; only the toolkit version changes.
+
+  Full writeup: docs/03-runpod-setup.md section 6.
+------------------------------------------------------------------
+EOF
+  exit 1
+fi

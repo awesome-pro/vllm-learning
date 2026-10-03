@@ -116,25 +116,41 @@ if [ -x "$VL_PY" ]; then
   if torch_out="$("$VL_PY" - <<'PY' 2>&1
 import torch
 print("torch", torch.__version__, "built for CUDA", torch.version.cuda)
+# device_count() reads NVML, exactly like nvidia-smi does. It will happily report
+# a device on a pod where the CUDA runtime cannot create a context at all, so ask
+# the runtime itself before trusting the count.
+try:
+    torch.cuda.init()
+    runtime = "ok"
+except Exception as exc:      # cudaErrorUnknown, cudaErrorInsufficientDriver, ...
+    runtime = f"{type(exc).__name__}: {exc}"
+print("runtime", runtime)
 print("cuda_available", torch.cuda.is_available())
 print("device_count", torch.cuda.device_count())
-for i in range(torch.cuda.device_count()):
-    free, total = torch.cuda.mem_get_info(i)
-    print(f"gpu{i} {torch.cuda.get_device_name(i)} "
-          f"free={free / 2**30:.1f}GiB total={total / 2**30:.1f}GiB")
+if runtime == "ok":
+    for i in range(torch.cuda.device_count()):
+        free, total = torch.cuda.mem_get_info(i)
+        print(f"gpu{i} {torch.cuda.get_device_name(i)} "
+              f"free={free / 2**30:.1f}GiB total={total / 2**30:.1f}GiB")
 PY
 )"; then
     while IFS= read -r line; do printf '         %s\n' "$line"; done <<<"$torch_out"
-    if grep -q '^cuda_available True' <<<"$torch_out"; then
-      pass "torch.cuda.is_available() is True"
+    if grep -q '^runtime ok' <<<"$torch_out"; then
+      pass "CUDA runtime initialized - torch.cuda.init() created a context"
+      if grep -q '^device_count 0' <<<"$torch_out"; then
+        fail "torch sees 0 CUDA devices" \
+          "confirm the pod has a GPU and that /dev/nvidia* exists inside it"
+      else
+        pass "torch sees $(grep -c '^gpu[0-9]' <<<"$torch_out") CUDA device(s), with free VRAM above"
+      fi
+    elif grep -q '^runtime ' <<<"$torch_out"; then
+      fail "CUDA runtime cannot initialize: $(grep -m1 '^runtime ' <<<"$torch_out" | cut -c9-)" \
+        "the install is fine: nvidia-smi and device_count() use NVML and still see the card, but CUDA cannot make a context. Work through docs/03-runpod-setup.md section 6"
+      note "the device_count above comes from NVML, not from CUDA, so a non-zero"
+      note "count does NOT mean CUDA works - every stage after this one needs it."
     else
       fail "torch.cuda.is_available() is False" \
-        "CPU-only install - reinstall vLLM inside the venv with uv pip install vllm --torch-backend=auto"
-    fi
-    if grep -q '^device_count 0' <<<"$torch_out"; then
-      fail "torch sees 0 CUDA devices" "confirm the pod has a GPU and /dev/nvidia* exists inside it"
-    else
-      pass "torch sees $(grep -c '^gpu[0-9]' <<<"$torch_out") CUDA device(s), with free VRAM above"
+        "CPU-only install - reinstall vLLM inside the venv with: uv pip install vllm --torch-backend=auto"
     fi
   else
     fail "could not query torch.cuda" "reinstall torch in the venv: bash scripts/bootstrap.sh"
