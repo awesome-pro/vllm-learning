@@ -409,6 +409,32 @@ Two alternatives if you would rather not use git at all:
 > forgot about costs $12/month. The single most expensive habit in this project is a pod you did
 > not stop.
 
+### If you chose Plan C (no volume disk)
+
+Then nothing above survives a stop, and the pod is disposable — there is no `/workspace` worth
+protecting. Your session ritual becomes four commands, ~10 minutes including the model download:
+
+```bash
+cd /workspace
+git clone https://github.com/awesome-pro/vllm-learning.git vlearning   # public: no credentials
+bash vlearning/scripts/bootstrap.sh     # ~6 min install, then prefetches tiny+mid (~9 GB)
+cd vlearning && source scripts/env.sh
+bash labs/00_verify_install.sh
+```
+
+Two consequences worth internalising:
+
+- **Keep your notes on the Mac, not the pod.** Every lab ends by printing a `RECORD:` block, which is
+  designed to be pasted into `notes/` on your laptop and committed from there. This also sidesteps the
+  one thing Plan C makes awkward: getting push credentials onto a pod that forgets `~/.ssh` along with
+  everything else.
+- **Stopping is free and loses nothing**, so stop aggressively. The "Stop, never Terminate" rule in §1
+  exists to protect a volume disk; with no volume disk there is nothing to protect — but a 4090 still
+  costs ~$0.34/hour while it idles.
+
+The ritual's real cost is the download, roughly 2–4 minutes on RunPod's network. If you only need the
+small model today, cut it with `LADDER=tiny bash vlearning/scripts/bootstrap.sh` (1.5 GB instead of 9 GB).
+
 ---
 
 ## 9. When to rent something else
