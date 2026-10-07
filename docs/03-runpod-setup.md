@@ -70,7 +70,8 @@ Console → **Pods** → **Deploy**.
 | Container disk | **30 GB** | Holds the image plus scratch. Wiped on stop. |
 | Volume disk | **60 GB** (Plan A) | Everything important lives on `/workspace`. |
 | Expose HTTP ports | **8888**, **8000** | 8888 = JupyterLab (RunPod starts it for you), 8000 = your vLLM server |
-| Expose TCP port | **22** (optional) | Direct SSH. Needs a public IP; enables `rsync`/`scp`, which the proxy does not support. |
+| Public IP | **enabled** | Without it your only SSH is the `ssh.runpod.io` proxy, which **cannot run VS Code** — it has no exec channel (§4). Enable this before you deploy; it cannot be added to a running pod. The pods checked showed no separate charge for it. |
+| Expose TCP port 22 | **22** | Direct SSH: enables `rsync`/`scp` *and* the connection VS Code needs. The proxy supports none of these. |
 | Env var | `HF_HOME=/workspace/hf` | Keeps model weights on the persistent disk, not the container. |
 | Env var | `HF_TOKEN=…` (optional) | Only needed for gated models. The Qwen3 ladder is not gated. |
 
@@ -199,9 +200,16 @@ cannot use it, so on that card stack A genuinely requires a new driver; it is no
 ssh <pod-id>-<hash>@ssh.runpod.io -i ~/.ssh/id_ed25519
 ```
 
-The proxy does **not** support `scp`/`sftp`. It is still fine for VS Code Remote-SSH.
+The proxy is good for an interactive shell and **nothing else**. It does not support `scp`/`sftp`, and —
+the part that catches people — it is **interactive-shell only**: it rejects any session without a
+pseudo-terminal (`Error: Your SSH client doesn't support PTY`) and *ignores the command* even when one is
+forced with `ssh -tt`, dropping you into a shell instead. Both behaviours verified against the live proxy.
 
-**SSH direct (recommended if you enabled TCP 22)** — the pod's public IP and mapped port:
+**Consequence: VS Code Remote-SSH cannot use the proxy.** VS Code works by *executing* its server binary
+over an exec channel; the proxy has no exec channel. If you want VS Code, you need the direct form below —
+which is why §2's deploy recipe exposes TCP 22.
+
+**SSH direct (recommended, and required for VS Code)** — the pod's public IP and mapped port:
 
 ```bash
 ssh root@<public-ip> -p <mapped-port>
@@ -235,8 +243,8 @@ every redeploy, so re-read them from Connect → SSH each time rather than trust
    ```
 
    `ServerAliveInterval` earns its place on RunPod: without keepalives an idle connection gets dropped
-   and VS Code reconnects in the middle of your edit. (For the proxy form instead: `HostName
-   ssh.runpod.io`, `User <pod-id>-<hash>`, and no `Port`.)
+   and VS Code reconnects in the middle of your edit. (There is no proxy variant of this block — the
+   proxy cannot run VS Code at all, see above.)
 
    **This block goes stale on every redeploy.** A new pod means a new IP and port; update those two
    values or the alias simply refuses to connect.
