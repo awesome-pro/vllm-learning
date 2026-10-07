@@ -14,6 +14,19 @@ Stage 11 is open-ended.
 Legend: 📖 docs · 🔍 source (relative to `$VLLM_SRC`) · 🧪 lab · 📊 experiment ·
 ✅ checkpoint (answer out loud, without notes) · 📝 companion doc · ⏱ time
 
+**Split each stage by what it costs.** The icons tell you where the GPU is needed:
+
+| Runs on a laptop, free | Needs the pod, metered |
+| --- | --- |
+| 📖 docs · 🔍 source · the arithmetic behind every 📊 | 🧪 lab · *running* the 📊 · ✅ checkpoints that quote a measured number |
+
+The reading is the slow half, and vLLM publishes **no macOS wheels** (the PyPI wheel is `manylinux`
+only), so the labs genuinely cannot run on a Mac — there is nothing to `pip install`. What you can do
+offline is most of the understanding: read the docs, read the source at `$VLLM_SRC` (`env.sh` locates a
+local checkout for you), work the KV arithmetic out of each `config.json`, and write down what you
+predict each lab will print. Pod time then goes on measuring and comparing, which is the only part that
+needs a meter running.
+
 > **Before Stage 0:** do [`docs/03-runpod-setup.md`](docs/03-runpod-setup.md). It gives you the exact
 > pod recipe, the storage decision (which is where the money goes), and the 5-minute bootstrap.
 >

@@ -14,9 +14,9 @@
 #   bash labs/00_verify_install.sh
 #
 # PREREQUISITES
-#   None - no server needed. It is a GPU lab, so on a laptop the pod/GPU/vLLM
-#   checks report FAIL, which is the correct answer. The first run may download
-#   $MODEL_TINY (~1.4 GB) into $HF_HOME.
+#   None - no server needed. It is a GPU lab: on a laptop it stops immediately with an
+#   explanation and exit code 3, instead of reporting failures that only mean "this is
+#   not a GPU". The first run may download $MODEL_TINY (~1.4 GB) into $HF_HOME.
 #
 # SAFE TO RE-RUN: read-only checks plus one tiny in-process generation. ~10 s warm,
 #   ~2 min if the tiny model still has to come down.
@@ -58,6 +58,36 @@ printf 'VLLM_SRC   : %s\n' "$VLLM_SRC"
 printf 'HF_HOME    : %s\n' "$HF_HOME"
 printf 'MODEL_TINY : %s\n' "$MODEL_TINY"
 echo
+
+# --- Guard: this lab verifies a GPU pod, and nothing else --------------------
+# Without a GPU every check below fails by construction, and the remediation text
+# ("run bootstrap.sh", "redeploy with this image", "clone the v0.30.0 tag") is
+# actively wrong advice for a machine that cannot run vLLM at all: the PyPI wheel is
+# manylinux-only, so macOS has nothing to install. Say that plainly instead of
+# printing eight failures that all look like something is broken.
+if [ ! -d /workspace ] || ! command -v nvidia-smi >/dev/null 2>&1; then
+  hr
+  echo "NOT A GPU MACHINE - nothing was verified, and nothing is broken"
+  hr
+  echo "This lab checks a rented GPU pod: /workspace, a driver, a CUDA runtime that can"
+  echo "make a context, vLLM inside a venv, and one real generation. None of that exists"
+  echo "here, and vLLM publishes no macOS wheels, so it cannot be installed here either."
+  echo
+  echo "What this machine is genuinely good for, at zero cost:"
+  echo "  1. the concepts      docs/00-orientation.md through docs/07-contributing.md"
+  echo "  2. the source        \$VLLM_SRC = $VLLM_SRC"
+  echo "                       (the paths the docs cite resolve inside this checkout)"
+  echo "  3. the arithmetic    docs/02 section 8 for KV bytes/token, README's model table,"
+  echo "                       and get_batch_defaults() in vllm/engine/arg_utils.py"
+  echo "  4. your predictions  write them into notes/, then check them on the pod"
+  echo
+  echo "On the pod this same command is your first move, and should print:"
+  echo "  11 passed, 0 failed"
+  echo
+  echo "If you expected a GPU here, see docs/03-runpod-setup.md section 6."
+  hr
+  exit 3   # 3 = not a GPU machine, distinct from 1 = checks actually failed
+fi
 
 # --- 1. Are we on a pod? -----------------------------------------------------
 hr

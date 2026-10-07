@@ -18,9 +18,26 @@ else
   export WS="${WS:-$VL_ROOT}"
 fi
 
-export VLLM_SRC="${VLLM_SRC:-$WS/src/vllm}"   # shallow clone of upstream at v0.30.0
+export VLLM_SRC="${VLLM_SRC:-}"               # resolved just below
 export HF_HOME="${HF_HOME:-$WS/hf}"           # model weights live on the volume
 export VENV="${VENV:-$WS/venv}"               # vLLM's virtualenv, also on the volume
+
+# --- The vLLM source you will be reading -------------------------------------
+# Every doc here cites source as `$VLLM_SRC/vllm/...`. On the pod that is the pinned
+# v0.30.0 clone under /workspace. A laptop has no clone there -- but you probably
+# already have a vLLM checkout somewhere, and locating it is what makes those paths
+# clickable while you read. That reading is most of the work you can do without a GPU,
+# so it is worth getting right.
+if [ -z "${VLLM_SRC:-}" ] && [ ! -d "$WS/src/vllm/vllm" ]; then
+  for candidate in "$HOME/Desktop/vllm" "$HOME/vllm" "$VL_ROOT/../vllm"; do
+    if [ -d "$candidate/vllm" ]; then
+      VLLM_SRC="$candidate"
+      printf 'env: source checkout = %s (local, not the pod clone -- check the version)\n' "$candidate"
+      break
+    fi
+  done
+fi
+export VLLM_SRC="${VLLM_SRC:-$WS/src/vllm}"   # shallow clone of upstream at v0.30.0
 
 # --- Keep the toolchain on the volume too ------------------------------------
 # RunPod CLEARS the container disk when a pod stops, but /workspace survives. If
