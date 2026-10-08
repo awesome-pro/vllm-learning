@@ -20,12 +20,10 @@ Legend: 📖 docs · 🔍 source (relative to `$VLLM_SRC`) · 🧪 lab · 📊 e
 | --- | --- |
 | 📖 docs · 🔍 source · the arithmetic behind every 📊 | 🧪 lab · *running* the 📊 · ✅ checkpoints that quote a measured number |
 
-The reading is the slow half, and vLLM publishes **no macOS wheels** (the PyPI wheel is `manylinux`
-only), so the labs genuinely cannot run on a Mac — there is nothing to `pip install`. What you can do
-offline is most of the understanding: read the docs, read the source at `$VLLM_SRC` (`env.sh` locates a
-local checkout for you), work the KV arithmetic out of each `config.json`, and write down what you
-predict each lab will print. Pod time then goes on measuring and comparing, which is the only part that
-needs a meter running.
+The reading is the slow half, and it needs no GPU at all. Better still: **the labs run on an Apple
+Silicon Mac too**, through `vllm-metal` — the real engine, with a Metal attention kernel in place of the
+CUDA one. [`docs/mac-onramp.md`](docs/mac-onramp.md) walks through it, with Stages 0–4 measured on an M4.
+(Plain `pip install vllm` still fetches nothing on macOS: the PyPI wheel is `manylinux` only.)
 
 > **Before Stage 0:** do [`docs/03-runpod-setup.md`](docs/03-runpod-setup.md). It gives you the exact
 > pod recipe, the storage decision (which is where the money goes), and the 5-minute bootstrap.

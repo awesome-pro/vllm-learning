@@ -47,24 +47,25 @@ Watch the numbering: **stages and labs are off by one** — Stage 0 is labs `00`
 
 ---
 
-## What you can do without a GPU
+## Running it on your Mac
 
-`pip install vllm` on macOS has nothing to fetch — the wheel is Linux-only (`manylinux_2_28`), and the
-community MLX path is retired here ([`legacy/mac-metal/`](legacy/mac-metal/README.md)). But the reading
-half of every stage is the slow half, and none of it needs a GPU:
+You can do more than read. **vllm-metal** is a vLLM-project hardware plugin that runs the real engine
+— V1 scheduler, paged KV cache, OpenAI-compatible server — on Apple Silicon, with MLX doing the compute.
+Its guide is [`docs/mac-onramp.md`](docs/mac-onramp.md), verified end to end on an M4 with 24 GB:
+**labs 01–05 run there unmodified**, and measured **6.27× from continuous batching** and **2.59× from
+prefix caching** on that laptop.
 
-**Do on your laptop:** this README and `docs/00`–`docs/07`; all the `🔍 source` reading — `source
-scripts/env.sh` finds a local vLLM checkout automatically, so the `$VLLM_SRC/...` paths cited in the docs
-are clickable; the KV and batch-budget arithmetic; writing your predictions into `notes/`; and
-`bash scripts/check-guide.sh`, which validates the guide against whatever checkout you have.
+(Plain `pip install vllm` still fetches nothing on macOS — the PyPI wheel is `manylinux` only. The
+retired MLX edition of this project is in [`legacy/mac-metal/`](legacy/mac-metal/README.md).)
 
-**Do on the pod:** every lab under `labs/`, the startup log lines they read, and anything you intend to
-call a measurement. Expect the laptop experience to be blunt but honest, and not a sign of a broken
-setup: `labs/00` stops immediately and says why (exit 3), a Python lab fails with a plain
-`ModuleNotFoundError: No module named 'vllm'`, and the server labs report "no server".
+**Do on your laptop:** everything in the on-ramp; this README and `docs/00`–`docs/07`; all the
+`🔍 source` reading — `source scripts/env.sh` finds a local vLLM checkout automatically, so the
+`$VLLM_SRC/...` paths cited in the docs are clickable; and the KV and batch-budget arithmetic.
 
-So the cheap workflow is: **read and predict at home, then rent the pod to run the lab and compare
-against your prediction.** That is also the habit the whole project is built on.
+**Do on the pod:** anything in §7 of the on-ramp — CUDA graphs, FP8, tensor parallelism, the real
+process topology — plus every absolute performance number you intend to quote.
+
+Either way the habit is the same: **predict at home, then measure on the machine that can tell you.**
 
 ---
 

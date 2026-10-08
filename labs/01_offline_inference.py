@@ -112,10 +112,10 @@ def request_timings(out) -> dict | None:
 
 
 def main() -> None:
-    print(f"Loading {MODEL} ...  (the slow part - watch the log lines)")
+    # print(f"Loading {MODEL} ...  (the slow part - watch the log lines)")
     print(f"max_model_len={MAXLEN}  gpu_memory_utilization={UTIL}")
-    print("Note: disable_log_stats=False is REQUIRED for per-request metrics;")
-    print("      LLM() defaults it to True, and then RequestOutput.metrics is None.")
+    # print("Note: disable_log_stats=False is REQUIRED for per-request metrics;")
+    # print("      LLM() defaults it to True, and then RequestOutput.metrics is None.")
     load_start = time.perf_counter()
     llm = LLM(
         model=MODEL,

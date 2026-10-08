@@ -10,16 +10,32 @@ VL_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 export VL_ROOT
 
 # --- Where things live -------------------------------------------------------
-# On the pod everything durable is on the volume, mounted at /workspace.
+# Two supported machines, and they differ in ways that matter:
+#
+#   the pod   durable state on the volume at /workspace; a 24 GB card with its own
+#             VRAM, so vLLM may take 0.90 of it.
+#   a laptop  no volume. vLLM comes from vllm-metal's venv (see docs/mac-onramp.md)
+#             and weights come from the normal HuggingFace cache you already have.
+#             Crucially the memory is UNIFIED: `--gpu-memory-utilization` is a ceiling
+#             on the same pool macOS and your apps are using, so the pod's 0.90 would
+#             try to reserve ~23 GB of a 26 GB Mac and bring the machine to its knees.
 if [ -d /workspace ]; then
   export WS="${WS:-/workspace}"
+  export HF_HOME="${HF_HOME:-$WS/hf}"         # model weights live on the volume
+  export VENV="${VENV:-$WS/venv}"             # vLLM's virtualenv, also on the volume
+  export UTIL="${UTIL:-0.90}"                 # 24 GB of VRAM: leave ~2.4 GB headroom
+  export MAXLEN="${MAXLEN:-8192}"
+  export HOST="${HOST:-0.0.0.0}"              # reachable from your laptop via the proxy
 else
-  # Local machine (reading docs / editing). Labs will not run here.
   export WS="${WS:-$VL_ROOT}"
+  # Reuse the machine's existing HF cache; do not start an empty one beside the guide.
+  export HF_HOME="${HF_HOME:-$HOME/.cache/huggingface}"
+  # vllm-metal's installer puts the whole toolchain here (docs/mac-onramp.md).
+  export VENV="${VENV:-$HOME/.venv-vllm-metal}"
+  export UTIL="${UTIL:-0.30}"                 # unified memory: keep the Mac usable
+  export MAXLEN="${MAXLEN:-4096}"             # KV per request; halved for the laptop
+  export HOST="${HOST:-127.0.0.1}"            # loopback: no LAN exposure, no firewall prompt
 fi
-
-export HF_HOME="${HF_HOME:-$WS/hf}"           # model weights live on the volume
-export VENV="${VENV:-$WS/venv}"               # vLLM's virtualenv, also on the volume
 
 # --- The vLLM source you will be reading -------------------------------------
 # Every doc here cites source as `$VLLM_SRC/vllm/...`. On the pod that is the pinned
@@ -66,11 +82,17 @@ export MODEL_MOE="${MODEL_MOE:-Qwen/Qwen3-30B-A3B}"   # ~61 GB bf16 — needs 80
 export MODEL="${MODEL:-$MODEL_TINY}"                  # default model for labs
 
 # --- Server defaults ---------------------------------------------------------
+# UTIL and MAXLEN were already defaulted above, per platform: 0.90/8192 on the pod's
+# dedicated 24 GB of VRAM, 0.30/4096 on a laptop's unified memory. Override either on
+# the command line for a single run, e.g.  UTIL=0.45 bash scripts/serve.sh
 export PORT="${PORT:-8000}"
-export UTIL="${UTIL:-0.90}"        # gpu-memory-utilization: 0.90 leaves ~2.4 GB headroom on 24 GB
+export UTIL="${UTIL:-0.90}"
 export MAXLEN="${MAXLEN:-8192}"
+export HOST="${HOST:-0.0.0.0}"
 
-# --- Activate the pod venv ---------------------------------------------------
+# --- Activate vLLM's virtualenv ----------------------------------------------
+# The pod's venv, or vllm-metal's on a laptop. Both are ordinary venvs, so the same
+# labs run on either machine with no changes.
 if [ -f "$VENV/bin/activate" ]; then
   # shellcheck disable=SC1091
   . "$VENV/bin/activate"

@@ -46,14 +46,27 @@ MODEL="${1:-$MODEL_TINY}"
 PORT="${PORT:-8000}"
 UTIL="${UTIL:-0.90}"
 MAXLEN="${MAXLEN:-8192}"
+# 0.0.0.0 on the pod (the RunPod proxy needs it); 127.0.0.1 on a laptop, so the server
+# is not exposed on your local network and macOS raises no firewall prompt. See env.sh.
+HOST="${HOST:-0.0.0.0}"
 shift || true
+
+# The banner differs by machine: only the pod has a public proxy URL, and only a laptop
+# has the unified-memory caveat that makes UTIL mean something different.
+if [ -d /workspace ]; then
+  WHERE="pod"
+  PUBLIC="https://<pod-id>-${PORT}.proxy.runpod.net   (via RunPod proxy)"
+else
+  WHERE="laptop (vllm-metal / MLX)"
+  PUBLIC="(none - loopback only; set HOST=0.0.0.0 to expose it)"
+fi
 
 cat <<EOF
 ------------------------------------------------------------------
- Serving   : ${MODEL}
- Endpoint  : http://127.0.0.1:${PORT}/v1          (from the pod)
- Public    : https://<pod-id>-${PORT}.proxy.runpod.net   (via RunPod proxy)
- Docs/UI   : http://127.0.0.1:${PORT}/docs
+ Serving   : ${MODEL}      [${WHERE}]
+ Endpoint  : http://${HOST}:${PORT}/v1
+ Public    : ${PUBLIC}
+ Docs/UI   : http://${HOST}:${PORT}/docs
  max-model-len          : ${MAXLEN}
  gpu-memory-utilization : ${UTIL}    (sets the KV cache budget)
  extra args             : $*
@@ -62,7 +75,7 @@ cat <<EOF
 EOF
 
 exec vllm serve "${MODEL}" \
-  --host 0.0.0.0 \
+  --host "${HOST}" \
   --port "${PORT}" \
   --max-model-len "${MAXLEN}" \
   --gpu-memory-utilization "${UTIL}" \
