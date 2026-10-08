@@ -98,6 +98,13 @@ Measured here, on this Mac, with `Qwen/Qwen3-0.6B` at `UTIL=0.30`, `MAXLEN=4096`
 Those five numbers are the whole of Stages 0–4, and you just measured them on a laptop. The pod
 re-measures them on real hardware, which is the point of going there — not the concepts.
 
+**Which models are practical here.** `Qwen/Qwen3-0.6B` is the right default: 1.4 GB of weights leaves
+nearly all of a 0.30 budget for KV, and it is a single-file download that the HuggingFace cache may
+already hold. `Qwen3-4B` (7.5 GB of weights) is usable if you raise `UTIL` to about 0.5. `Qwen3-8B`
+(16.4 GB) is **not** a 0.30 laptop model — it would need `UTIL≈0.75`, leaving macOS and your apps very
+little room. Use the pod for the 8B and the MoE; that is precisely what it is for. Weights come from your
+normal HF cache (`~/.cache/huggingface`), so check there before assuming a download is needed.
+
 ---
 
 ## 5. The startup line, and its Mac quirk
